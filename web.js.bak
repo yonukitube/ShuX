@@ -1,0 +1,31 @@
+const path = require("path");
+const fs = require("fs");
+const http = require("http");
+const root = path.join(__dirname, "public");
+
+http.createServer((req, res) => {
+  const pathname = decodeURIComponent(req.url.split('?')[0]);
+  const file = pathname === '/' ? 'index.html' : pathname.slice(1);
+  const full = path.resolve(root, file);
+
+  if (!full.startsWith(root + path.sep)) {
+    res.writeHead(403);
+    return res.end('Forbidden');
+  }
+
+  fs.readFile(full, (err, data) => {
+    if (err) {
+      res.writeHead(404);
+      return res.end('Not found');
+    }
+
+    const type = full.endsWith('.css')
+      ? 'text/css; charset=utf-8'
+      : 'text/html; charset=utf-8';
+
+    res.writeHead(200, { 'Content-Type': type });
+    res.end(data);
+  });
+}).listen(5600, '127.0.0.1', () => {
+  console.log('ShuX Web: http://127.0.0.1:5600');
+});

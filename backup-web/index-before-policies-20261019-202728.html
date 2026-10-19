@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ShuX Control Panel</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div>
+    <h1>ShuX</h1>
+    <p>Android Control Panel</p>
+  </div>
+  <span id="apiBadge" class="badge">Checking API...</span>
+</header>
+
+<main>
+  <nav class="nav">
+    <button onclick="showPage('dashboard')">Dashboard</button>
+    <button onclick="showPage('devices')">Devices</button>
+    <button onclick="showPage('apps')">Required Apps</button>
+    <button onclick="showPage('commands')">ADB Commands</button>
+    <button onclick="showPage('wireless')">Wireless Debugging</button>
+  </nav>
+
+  <section id="dashboard" class="page">
+    <div class="card hero">
+      <p class="eyebrow">CONTROL CENTER</p>
+      <h2>Welcome to ShuX</h2>
+      <p>Manage ADB connections and application requests from one place.</p>
+      <div class="actions">
+        <button onclick="reconnect()">Reconnect</button>
+        <button class="secondary" onclick="refreshDevices()">Check Devices</button>
+      </div>
+      <p id="mainMessage" class="message">Ready.</p>
+    </div>
+
+    <div class="grid">
+      <button class="tile" onclick="showPage('devices')">
+        <span class="tile-icon">01</span>
+        <strong>Devices</strong>
+        <span>Connection status and device information</span>
+      </button>
+      <button class="tile" onclick="showPage('apps');loadRequests()">
+        <span class="tile-icon">02</span>
+        <strong>Required Apps</strong>
+        <span>Review and manage application requests</span>
+      </button>
+      <button class="tile" onclick="showPage('commands')">
+        <span class="tile-icon">03</span>
+        <strong>ADB Commands</strong>
+        <span>Run commands and inspect their output</span>
+      </button>
+      <button class="tile" onclick="showPage('wireless')">
+        <span class="tile-icon">04</span>
+        <strong>Wireless Debugging</strong>
+        <span>Pair Android and connect over Wi-Fi</span>
+      </button>
+    </div>
+  </section>
+
+  <section id="devices" class="page hidden">
+    <div class="card">
+      <div class="section-head">
+        <div>
+          <h2>Devices</h2>
+          <p>ADB connection information</p>
+        </div>
+        <button onclick="refreshDevices()">Refresh Devices</button>
+      </div>
+      <div id="deviceSummary" class="notice">No device check performed yet.</div>
+      <pre id="deviceOutput">Press Refresh Devices to check ADB.</pre>
+      <div class="actions">
+        <button onclick="reconnect()">Reconnect</button>
+        <button class="secondary" onclick="showPage('wireless')">Wireless Debugging</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="apps" class="page hidden">
+    <div class="card">
+      <div class="section-head">
+        <div>
+          <h2>Required Apps</h2>
+          <p>Review incoming application requests</p>
+        </div>
+        <button onclick="loadRequests()">Refresh Requests</button>
+      </div>
+      <div id="requestsList" class="stack">
+        <p>Press Refresh Requests to load requests.</p>
+      </div>
+    </div>
+    <div id="requestDetail" class="card hidden">
+      <h2>Request Details</h2>
+      <div id="requestInfo"></div>
+      <pre id="requestResult"></pre>
+      <div id="requestActions" class="actions"></div>
+    </div>
+  </section>
+
+  <section id="commands" class="page hidden">
+    <div class="card">
+      <h2>ADB Commands</h2>
+      <p>Enter ADB arguments, for example <code>devices -l</code> or <code>shell id</code>.</p>
+      <form id="commandForm">
+        <label for="commandInput">Command arguments</label>
+        <input id="commandInput" autocomplete="off" maxlength="2000"
+          placeholder="shell getprop ro.build.version.release" required>
+        <button id="commandButton" type="submit">Execute Command</button>
+      </form>
+      <p id="commandMessage" class="message"></p>
+      <h3>Output</h3>
+      <pre id="commandOutput">Command output will appear here.</pre>
+    </div>
+  </section>
+
+  <section id="wireless" class="page hidden">
+    <div class="card">
+      <h2>Wireless Debugging</h2>
+      <p>Enable Wireless debugging in Android Developer options. Open its pairing dialog before starting pairing.</p>
+      <button onclick="reconnect()">Discover &amp; Reconnect</button>
+      <div id="pairPanel" class="subcard hidden">
+        <h3>Pair Device</h3>
+        <p id="pairAddress">Waiting for pairing address...</p>
+        <form id="pairForm">
+          <label for="pairCode">Six-digit pairing code</label>
+          <input id="pairCode" inputmode="numeric" pattern="[0-9]{6}"
+            maxlength="6" placeholder="123456" required>
+          <button type="submit">Pair &amp; Connect</button>
+        </form>
+      </div>
+      <p id="wirelessMessage" class="message">Ready.</p>
+      <pre id="wirelessOutput">Connection results will appear here.</pre>
+    </div>
+  </section>
+</main>
+
+<footer>ShuX · Local Android Control Panel</footer>
+
+<script>
+const $ = id => document.getElementById(id);
+
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.add('hidden'));
+  $(name).classList.remove('hidden');
+  window.scrollTo({top: 0, behavior: 'smooth'});
+}
+
+async function api(path, options = {}) {
+  const response = await fetch('/api' + path, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers || {})
+    }
+  });
+  const text = await response.text();
+  let data;
+  try { data = JSON.parse(text); }
+  catch { data = {error: text || 'Invalid server response'}; }
+  if (!response.ok) throw new Error(data.error || 'Request failed');
+  return data;
+}
+
+function setMessage(id, text) {
+  $(id).textContent = text;
+}
+
+async function checkStatus() {
+  try {
+    const data = await api('/health');
+    $('apiBadge').textContent = data.name + ' · ' + data.status;
+    $('apiBadge').className = 'badge online';
+  } catch (error) {
+    $('apiBadge').textContent = 'API unavailable';
+    $('apiBadge').className = 'badge offline';
+  }
+}
+
+function parseDevices(raw) {
+  const lines = String(raw || '').split(/\r?\n/).slice(1);
+  return lines.filter(line => /\bdevice\b/.test(line.trim()));
+}
+
+async function refreshDevices() {
+  $('deviceOutput').textContent = 'Checking ADB devices...';
+  $('deviceSummary').textContent = 'Checking...';
+  try {
+    const data = await api('/devices');
+    const raw = data.devices || '';
+    const devices = parseDevices(raw);
+    $('deviceOutput').textContent = raw || 'ADB returned no output.';
+    $('deviceSummary').textContent = devices.length
+      ? devices.length + ' online device(s) found.'
+      : 'No online devices found. Enable Wireless debugging and use Reconnect.';
+  } catch (error) {
+    $('deviceSummary').textContent = 'Device check failed.';
+    $('deviceOutput').textContent = error.message;
+  }
+}
+
+async function reconnect() {
+  setMessage('mainMessage', 'Discovering ADB services...');
+  setMessage('wirelessMessage', 'Discovering ADB services...');
+  $('wirelessOutput').textContent = '';
+  try {
+    const data = await api('/reconnect', {method: 'POST', body: '{}'});
+    const result = [data.message, data.output].filter(Boolean).join('\n\n');
+    setMessage('mainMessage', data.message || 'Reconnect finished.');
+    setMessage('wirelessMessage', data.message || 'Reconnect finished.');
+    $('wirelessOutput').textContent = result;
+    if (data.needsPairing) {
+      $('pairPanel').classList.remove('hidden');
+      $('pairAddress').textContent = 'Pairing address: ' + data.pairingAddress;
+      showPage('wireless');
+    } else if (data.connected) {
+      $('pairPanel').classList.add('hidden');
+      await refreshDevices();
+    }
+  } catch (error) {
+    setMessage('mainMessage', 'Reconnect failed: ' + error.message);
+    setMessage('wirelessMessage', 'Reconnect failed: ' + error.message);
+    $('wirelessOutput').textContent = error.message;
+  }
+}
+
+async function loadRequests() {
+  $('requestsList').textContent = 'Loading requests...';
+  $('requestDetail').classList.add('hidden');
+  try {
+    const data = await api('/requests');
+    const requests = data.requests || [];
+    $('requestsList').replaceChildren();
+
+    if (!requests.length) {
+      $('requestsList').textContent = 'No application requests found.';
+      return;
+    }
+
+    requests.slice().reverse().forEach(request => {
+      const card = document.createElement('div');
+      card.className = 'request-item';
+
+      const info = document.createElement('div');
+      const title = document.createElement('strong');
+      title.textContent = request.app;
+      const meta = document.createElement('p');
+      meta.textContent = 'Action: ' + request.action + ' · Status: ' + request.status;
+      info.append(title, meta);
+
+      const button = document.createElement('button');
+      button.textContent = 'Details';
+      button.onclick = () => showRequest(request.id);
+
+      card.append(info, button);
+      $('requestsList').append(card);
+    });
+  } catch (error) {
+    $('requestsList').textContent = 'Failed to load requests: ' + error.message;
+  }
+}
+
+async function showRequest(id) {
+  try {
+    const data = await api('/requests/' + encodeURIComponent(id));
+    const r = data.request;
+    $('requestInfo').textContent =
+      'ID: ' + r.id + '\nApp: ' + r.app + '\nAction: ' + r.action +
+      '\nStatus: ' + r.status + '\nCreated: ' + (r.createdAt || 'Unknown');
+    $('requestResult').textContent = r.result == null ? '' : String(r.result);
+    const actions = $('requestActions');
+    actions.replaceChildren();
+
+    if (r.status === 'pending') {
+      const approve = document.createElement('button');
+      approve.textContent = 'Approve & Execute';
+      approve.onclick = () => requestAction(r.id, 'approve');
+
+      const reject = document.createElement('button');
+      reject.textContent = 'Reject';
+      reject.className = 'danger';
+      reject.onclick = () => requestAction(r.id, 'reject');
+
+      actions.append(approve, reject);
+    }
+
+    const back = document.createElement('button');
+    back.textContent = 'Back to Requests';
+    back.className = 'secondary';
+    back.onclick = () => {
+      $('requestDetail').classList.add('hidden');
+      showPage('apps');
+    };
+    actions.append(back);
+    $('requestDetail').classList.remove('hidden');
+  } catch (error) {
+    alert('Could not load request: ' + error.message);
+  }
+}
+
+async function requestAction(id, action) {
+  if (action === 'approve' &&
+      !confirm('Approve this request and execute its allowed action?')) return;
+  if (action === 'reject' &&
+      !confirm('Reject this application request?')) return;
+
+  try {
+    const data = await api('/requests/' + encodeURIComponent(id) + '/' + action,
+      {method: 'POST', body: '{}'});
+    const r = data.request;
+    $('requestResult').textContent = r.result == null ? '' : String(r.result);
+    $('requestInfo').textContent =
+      'ID: ' + r.id + '\nApp: ' + r.app + '\nAction: ' + r.action +
+      '\nStatus: ' + r.status;
+    await loadRequests();
+    await showRequest(id);
+  } catch (error) {
+    alert('Request action failed: ' + error.message);
+  }
+}
+
+// Allow the mobile keyboard to close when leaving the command field.
+document.addEventListener('touchstart', event => {
+  const input = $('commandInput');
+  if (input && document.activeElement === input &&
+      !event.target.closest('#commandInput')) {
+    input.blur();
+  }
+}, {passive: true});
+
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' &&
+      document.activeElement === $('commandInput')) {
+    $('commandInput').blur();
+  }
+});
+
+$('commandForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  const command = $('commandInput').value.trim();
+  if (!command) return;
+
+  $('commandButton').disabled = true;
+  setMessage('commandMessage', 'Executing command...');
+  $('commandOutput').textContent = '';
+  try {
+    const data = await api('/commands', {
+      method: 'POST',
+      body: JSON.stringify({command})
+    });
+    $('commandOutput').textContent = data.output || '(No output)';
+    setMessage('commandMessage', 'Command completed.');
+  } catch (error) {
+    $('commandOutput').textContent = error.message;
+    setMessage('commandMessage', 'Command failed.');
+  } finally {
+    $('commandButton').disabled = false;
+  }
+});
+
+$('pairForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  const code = $('pairCode').value.trim();
+  setMessage('wirelessMessage', 'Pairing and connecting...');
+  $('wirelessOutput').textContent = '';
+
+  try {
+    const data = await api('/pair', {
+      method: 'POST',
+      body: JSON.stringify({code})
+    });
+    $('wirelessOutput').textContent = [data.message, data.output]
+      .filter(Boolean).join('\n\n');
+    setMessage('wirelessMessage', data.message || 'Pairing finished.');
+    if (data.paired) $('pairCode').value = '';
+    if (data.connected) {
+      $('pairPanel').classList.add('hidden');
+      await refreshDevices();
+    }
+  } catch (error) {
+    setMessage('wirelessMessage', 'Pairing failed.');
+    $('wirelessOutput').textContent = error.message;
+  }
+});
+
+checkStatus();
+</script>
+</body>
+</html>
